@@ -28,24 +28,24 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     html, body {
-      width: 100%; height: 100vh;
+      width: 100%; height: 100%;
       background: var(--th-bg-panel);
       color: var(--th-text);
       font-family: var(--th-font);
       display: flex;
-      align-items: center;
-      justify-content: center;
+      align-items: stretch;
+      justify-content: stretch;
       overflow: hidden;
       -webkit-font-smoothing: antialiased;
     }
 
     .calc-wrap {
       width: 100%;
-      max-width: 320px;
-      padding: 16px;
+      height: 100%;
+      padding: 12px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
     }
 
     /* ── Display ─────────────────────────────────────── */
@@ -58,7 +58,8 @@
       flex-direction: column;
       align-items: flex-end;
       gap: 4px;
-      min-height: 80px;
+      min-height: 72px;
+      flex-shrink: 0;
     }
 
     #exprDisplay {
@@ -82,7 +83,10 @@
     .calc-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 8px;
+      grid-template-rows: repeat(5, 1fr);
+      gap: 6px;
+      flex: 1;
+      min-height: 0;
     }
 
     .cb {
@@ -94,7 +98,7 @@
       font-size: 16px;
       font-weight: 500;
       padding: 0;
-      height: 52px;
+      height: auto;
       cursor: pointer;
       transition: background 0.1s, border-color 0.1s, color 0.1s;
       user-select: none;
@@ -144,29 +148,29 @@
 
   <div class="calc-grid">
     <!-- row 1 -->
-    <button class="cb fn ac" data-act="ac">AC</button>
-    <button class="cb fn"    data-act="sign">+/−</button>
-    <button class="cb fn"    data-act="pct">%</button>
-    <button class="cb op"    data-act="op" data-val="÷">÷</button>
+    <button class="cb fn ac" data-act="ac"  tabindex="-1">AC</button>
+    <button class="cb fn"    data-act="sign" tabindex="-1">+/−</button>
+    <button class="cb fn"    data-act="pct"  tabindex="-1">%</button>
+    <button class="cb op"    data-act="op" data-val="÷" tabindex="-1">÷</button>
     <!-- row 2 -->
-    <button class="cb"       data-act="digit" data-val="7">7</button>
-    <button class="cb"       data-act="digit" data-val="8">8</button>
-    <button class="cb"       data-act="digit" data-val="9">9</button>
-    <button class="cb op"    data-act="op" data-val="×">×</button>
+    <button class="cb"       data-act="digit" data-val="7" tabindex="-1">7</button>
+    <button class="cb"       data-act="digit" data-val="8" tabindex="-1">8</button>
+    <button class="cb"       data-act="digit" data-val="9" tabindex="-1">9</button>
+    <button class="cb op"    data-act="op" data-val="×" tabindex="-1">×</button>
     <!-- row 3 -->
-    <button class="cb"       data-act="digit" data-val="4">4</button>
-    <button class="cb"       data-act="digit" data-val="5">5</button>
-    <button class="cb"       data-act="digit" data-val="6">6</button>
-    <button class="cb op"    data-act="op" data-val="−">−</button>
+    <button class="cb"       data-act="digit" data-val="4" tabindex="-1">4</button>
+    <button class="cb"       data-act="digit" data-val="5" tabindex="-1">5</button>
+    <button class="cb"       data-act="digit" data-val="6" tabindex="-1">6</button>
+    <button class="cb op"    data-act="op" data-val="−" tabindex="-1">−</button>
     <!-- row 4 -->
-    <button class="cb"       data-act="digit" data-val="1">1</button>
-    <button class="cb"       data-act="digit" data-val="2">2</button>
-    <button class="cb"       data-act="digit" data-val="3">3</button>
-    <button class="cb op"    data-act="op" data-val="+">+</button>
+    <button class="cb"       data-act="digit" data-val="1" tabindex="-1">1</button>
+    <button class="cb"       data-act="digit" data-val="2" tabindex="-1">2</button>
+    <button class="cb"       data-act="digit" data-val="3" tabindex="-1">3</button>
+    <button class="cb op"    data-act="op" data-val="+" tabindex="-1">+</button>
     <!-- row 5 -->
-    <button class="cb zero"  data-act="digit" data-val="0">0</button>
-    <button class="cb"       data-act="dot">.</button>
-    <button class="cb eq"    data-act="eq">=</button>
+    <button class="cb zero"  data-act="digit" data-val="0" tabindex="-1">0</button>
+    <button class="cb"       data-act="dot" tabindex="-1">.</button>
+    <button class="cb eq"    data-act="eq"   tabindex="-1">=</button>
   </div>
 </div>
 
@@ -195,68 +199,8 @@ function setExpr(s) {
 document.querySelector('.calc-grid').addEventListener('click', e => {
   const btn = e.target.closest('.cb');
   if (!btn) return;
-  const act = btn.dataset.act;
-  const val = btn.dataset.val;
-
-  switch (act) {
-    case 'digit':
-      if (justCalc || waitingForOperand) { current = val; justCalc = false; waitingForOperand = false; }
-      else current = current === '0' ? val : current + val;
-      if (current.length > 15) current = current.slice(0, 15);
-      updateDisplay(current);
-      break;
-
-    case 'dot':
-      if (justCalc || waitingForOperand) { current = '0.'; justCalc = false; waitingForOperand = false; }
-      else if (!current.includes('.')) current += '.';
-      updateDisplay(current);
-      break;
-
-    case 'op':
-      justCalc = false;
-      if (stored !== null && pendingOp && !waitingForOperand) {
-        const res = calculate(stored, parseFloat(current), pendingOp);
-        current = String(res);
-        updateDisplay(current);
-      }
-      stored = parseFloat(current);
-      pendingOp = val;
-      waitingForOperand = true;
-      setExpr(mainDisp.textContent + ' ' + val);
-      break;
-
-    case 'eq':
-      if (pendingOp === null) break;
-      const res = calculate(stored, parseFloat(current), pendingOp);
-      setExpr(mainDisp.textContent + ' ' + pendingOp + ' ' + current + ' =');
-      current   = String(res);
-      stored    = null;
-      pendingOp = null;
-      justCalc  = true;
-      waitingForOperand = false;
-      updateDisplay(current);
-      break;
-
-    case 'ac':
-      current           = '0';
-      stored            = null;
-      pendingOp         = null;
-      justCalc          = false;
-      waitingForOperand = false;
-      updateDisplay('0');
-      setExpr('');
-      break;
-
-    case 'sign':
-      current = String(parseFloat(current) * -1);
-      updateDisplay(current);
-      break;
-
-    case 'pct':
-      current = String(parseFloat(current) / 100);
-      updateDisplay(current);
-      break;
-  }
+  btn.blur();
+  dispatch(btn.dataset.act, btn.dataset.val);
 });
 
 function calculate(a, b, op) {
@@ -273,29 +217,69 @@ function round(n) {
   return Math.round(n * 1e10) / 1e10;
 }
 
-// Keyboard support
+// Keyboard support — handle all input here, buttons have tabindex=-1 so they never steal focus
+const KB_KEYS = new Set(['0','1','2','3','4','5','6','7','8','9','.','Enter','=','+','-','*','/','Escape','Backspace','Delete']);
 document.addEventListener('keydown', e => {
   const key = e.key;
-  if (key >= '0' && key <= '9') click(`digit:${key}`);
-  else if (key === '.') click('dot:');
-  else if (key === '+') click('op:+');
-  else if (key === '-') click('op:−');
-  else if (key === '*') click('op:×');
-  else if (key === '/') { e.preventDefault(); click('op:÷'); }
-  else if (key === 'Enter' || key === '=') click('eq:');
-  else if (key === 'Escape') click('ac:');
+  if (!KB_KEYS.has(key)) return;
+  e.preventDefault();
+  if (key >= '0' && key <= '9') dispatch('digit', key);
+  else if (key === '.') dispatch('dot');
+  else if (key === '+') dispatch('op', '+');
+  else if (key === '-') dispatch('op', '−');
+  else if (key === '*') dispatch('op', '×');
+  else if (key === '/') dispatch('op', '÷');
+  else if (key === 'Enter' || key === '=') dispatch('eq');
+  else if (key === 'Escape' || key === 'Delete') dispatch('ac');
   else if (key === 'Backspace') {
-    if (current.length > 1) current = current.slice(0, -1);
+    if (justCalc) { current = '0'; justCalc = false; }
+    else if (current.length > 1) current = current.slice(0, -1);
     else current = '0';
     updateDisplay(current);
   }
 });
 
-function click(desc) {
-  const [act, val] = desc.split(':');
-  const btn = document.querySelector(`.cb[data-act="${act}"][data-val="${val}"]`)
-    || document.querySelector(`.cb[data-act="${act}"]`);
-  if (btn) btn.click();
+// Dispatch action directly (no .click() relay — avoids double-trigger)
+function dispatch(act, val) {
+  switch (act) {
+    case 'digit':
+      if (justCalc || waitingForOperand) { current = val; justCalc = false; waitingForOperand = false; }
+      else current = current === '0' ? val : current + val;
+      if (current.length > 15) current = current.slice(0, 15);
+      updateDisplay(current);
+      break;
+    case 'dot':
+      if (justCalc || waitingForOperand) { current = '0.'; justCalc = false; waitingForOperand = false; }
+      else if (!current.includes('.')) current += '.';
+      updateDisplay(current);
+      break;
+    case 'op':
+      justCalc = false;
+      if (stored !== null && pendingOp && !waitingForOperand) {
+        const r = calculate(stored, parseFloat(current), pendingOp);
+        current = String(r); updateDisplay(current);
+      }
+      stored = parseFloat(current); pendingOp = val; waitingForOperand = true;
+      setExpr(mainDisp.textContent + ' ' + val);
+      break;
+    case 'eq':
+      if (pendingOp === null) break;
+      { const r = calculate(stored, parseFloat(current), pendingOp);
+        setExpr(mainDisp.textContent + ' ' + pendingOp + ' ' + current + ' =');
+        current = String(r); stored = null; pendingOp = null; justCalc = true; waitingForOperand = false;
+        updateDisplay(current); }
+      break;
+    case 'ac':
+      current = '0'; stored = null; pendingOp = null; justCalc = false; waitingForOperand = false;
+      updateDisplay('0'); setExpr('');
+      break;
+    case 'sign':
+      current = String(parseFloat(current) * -1); updateDisplay(current);
+      break;
+    case 'pct':
+      current = String(parseFloat(current) / 100); updateDisplay(current);
+      break;
+  }
 }
 </script>
 <script src="../../js/themes.js"></script>

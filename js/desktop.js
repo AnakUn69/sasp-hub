@@ -27,14 +27,15 @@ const APPS = [
     minHeight: 320
   },
   {
-    id:        'kalkulator',
-    name:      'Kalkulačka',
-    icon:      'fa-solid fa-calculator',
-    url:       'apps/kalkulator/index.html',
-    width:     340,
-    height:    520,
-    minWidth:  300,
-    minHeight: 440
+    id:               'kalkulator',
+    name:             'Kalkulačka',
+    icon:             'fa-solid fa-calculator',
+    url:              'apps/kalkulator/index.html',
+    width:            340,
+    height:           520,
+    minWidth:         300,
+    minHeight:        440,
+    resizeCornersOnly: true
   },
   {
     id:        'malovani',
@@ -218,7 +219,19 @@ class WindowManager {
           sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"
         ></iframe>
       </div>
-      <div class="win-resize-handle" data-resize="${app.id}"></div>
+      ${app.resizeCornersOnly
+        ? `<div class="win-rh win-rh-ne" data-dir="ne"></div>
+           <div class="win-rh win-rh-se" data-dir="se"></div>
+           <div class="win-rh win-rh-sw" data-dir="sw"></div>
+           <div class="win-rh win-rh-nw" data-dir="nw"></div>`
+        : `<div class="win-rh win-rh-n"  data-dir="n"></div>
+           <div class="win-rh win-rh-ne" data-dir="ne"></div>
+           <div class="win-rh win-rh-e"  data-dir="e"></div>
+           <div class="win-rh win-rh-se" data-dir="se"></div>
+           <div class="win-rh win-rh-s"  data-dir="s"></div>
+           <div class="win-rh win-rh-sw" data-dir="sw"></div>
+           <div class="win-rh win-rh-w"  data-dir="w"></div>
+           <div class="win-rh win-rh-nw" data-dir="nw"></div>`}
     `;
 
     document.getElementById('windowsContainer').appendChild(el);
@@ -233,7 +246,7 @@ class WindowManager {
     };
 
     this._setupDrag(el.querySelector('.win-titlebar'), el, app.id);
-    this._setupResize(el.querySelector('.win-resize-handle'), el, app);
+    this._setupResize(el, app);
     el.addEventListener('mousedown', () => this._focus(app.id));
 
     if (TaskbarPins.isPinned(app.id)) {
@@ -362,12 +375,14 @@ class WindowManager {
         winEl.style.left = (e.clientX - ox) + 'px';
         winEl.style.top  = Math.max(0, e.clientY - oy) + 'px';
       };
-      const onUp = () => {
+      const stopDrag = () => {
         document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('mouseup', stopDrag);
+        document.querySelectorAll('.win-iframe').forEach(f => f.style.pointerEvents = '');
       };
+      document.querySelectorAll('.win-iframe').forEach(f => f.style.pointerEvents = 'none');
       document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      document.addEventListener('mouseup', stopDrag);
     });
     // Double-click titlebar → maximize/restore
     titlebar.addEventListener('dblclick', e => {
@@ -377,23 +392,45 @@ class WindowManager {
   }
 
   // ── Resize ─────────────────────────────────────────────────
-  _setupResize(handle, winEl, app) {
-    handle.addEventListener('mousedown', e => {
-      e.stopPropagation(); e.preventDefault();
-      const win = this.windows[app.id];
-      if (!win || win.maximized) return;
-      const sx = e.clientX, sy = e.clientY;
-      const sw = winEl.offsetWidth, sh = winEl.offsetHeight;
-      const onMove = e => {
-        winEl.style.width  = Math.max(app.minWidth  || 400, sw + e.clientX - sx) + 'px';
-        winEl.style.height = Math.max(app.minHeight || 300, sh + e.clientY - sy) + 'px';
-      };
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+  _setupResize(winEl, app) {
+    winEl.querySelectorAll('.win-rh').forEach(handle => {
+      handle.addEventListener('mousedown', e => {
+        e.stopPropagation(); e.preventDefault();
+        const win = this.windows[app.id];
+        if (!win || win.maximized) return;
+        this._focus(app.id);
+        const dir        = handle.dataset.dir;
+        const sw         = winEl.offsetWidth,  sh = winEl.offsetHeight;
+        const initLeft   = winEl.offsetLeft,   initTop = winEl.offsetTop;
+        // Anchored edges — these never move during this resize operation
+        const rightEdge  = initLeft + sw;
+        const bottomEdge = initTop  + sh;
+        const minW       = app.minWidth  || 300;
+        const minH       = app.minHeight || 200;
+        const onMove = e => {
+          let newW = sw, newH = sh, newX = initLeft, newY = initTop;
+          // Compute size directly from mouse→fixed-edge distance → no dead zone at min size
+          if (dir.includes('e')) { newW = Math.max(minW, e.clientX - initLeft);  }
+          if (dir.includes('s')) { newH = Math.max(minH, e.clientY - initTop);   }
+          if (dir.includes('w')) { newW = Math.max(minW, rightEdge  - e.clientX); newX = rightEdge  - newW; }
+          if (dir.includes('n')) { newH = Math.max(minH, bottomEdge - e.clientY); newY = bottomEdge - newH; }
+          winEl.style.width  = newW + 'px';
+          winEl.style.height = newH + 'px';
+          winEl.style.left   = newX + 'px';
+          winEl.style.top    = Math.max(0, newY) + 'px';
+        };
+        const stopResize = () => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup',   stopResize);
+          // Re-enable iframe pointer events
+          document.querySelectorAll('.win-iframe').forEach(f => f.style.pointerEvents = '');
+          this._persistState();
+        };
+        // Disable iframe pointer events so fast mouse moves don't get swallowed by the iframe
+        document.querySelectorAll('.win-iframe').forEach(f => f.style.pointerEvents = 'none');
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup',   stopResize);
+      });
     });
   }
 
