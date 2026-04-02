@@ -160,8 +160,10 @@ const Boot = {
 // ── Window Manager ────────────────────────────────────────────
 class WindowManager {
   constructor() {
-    this.windows    = {};
-    this.zCounter   = 100;
+    this.windows        = {};
+    this.zCounter       = 100;
+    this._pendingRestore = {};
+    this._restoring      = false;
     this._setupGlobalListeners();
   }
 
@@ -174,14 +176,15 @@ class WindowManager {
       return;
     }
 
-    // Calculate position (cascade stagger)
+    // Calculate position (cascade stagger or restored values)
+    const restore = this._pendingRestore[app.id];
     const count = Object.keys(this.windows).length;
     const maxW = window.innerWidth  - 80;
     const maxH = window.innerHeight - 90;
-    const w = Math.min(app.width  || 1000, maxW);
-    const h = Math.min(app.height || 700,  maxH);
-    const x = Math.max(20, Math.round((window.innerWidth  - w) / 2) + count * 28);
-    const y = Math.max(10, Math.round((window.innerHeight - 48 - h) / 2) + count * 22);
+    const w = restore ? restore.width  : Math.min(app.width  || 1000, maxW);
+    const h = restore ? restore.height : Math.min(app.height || 700,  maxH);
+    const x = restore ? restore.left   : Math.max(20, Math.round((window.innerWidth  - w) / 2) + count * 28);
+    const y = restore ? restore.top    : Math.max(10, Math.round((window.innerHeight - 48 - h) / 2) + count * 22);
 
     // Build window element
     const el = document.createElement('div');
@@ -244,6 +247,7 @@ class WindowManager {
       this._addTaskbarBtn(app);
     }
     this._focusVisuals(app.id);
+    if (!this._restoring) this._persistState();
   }
 
   // ── Focus ──────────────────────────────────────────────────
@@ -315,6 +319,7 @@ class WindowManager {
       win.taskbarBtn?.remove();
     }
     delete this.windows[id];
+    this._persistState();
   }
 
   // ── Taskbar Button ─────────────────────────────────────────
@@ -392,6 +397,60 @@ class WindowManager {
     });
   }
 
+  // ── Persist / Restore open windows ───────────────────────────
+  _persistState() {
+    if (this._restoring) return;
+    const state = {};
+    for (const [id, win] of Object.entries(this.windows)) {
+      if (!APPS.find(a => a.id === id)) continue;
+      const el = win.el;
+      state[id] = {
+        left:      win.maximized && win.prevRect ? win.prevRect.x : el.offsetLeft,
+        top:       win.maximized && win.prevRect ? win.prevRect.y : el.offsetTop,
+        width:     win.maximized && win.prevRect ? win.prevRect.w : el.offsetWidth,
+        height:    win.maximized && win.prevRect ? win.prevRect.h : el.offsetHeight,
+        minimized: win.minimized,
+        maximized: win.maximized,
+        prevRect:  win.prevRect,
+        zIndex:    parseInt(el.style.zIndex) || 100
+      };
+    }
+    try { sessionStorage.setItem('saspHub_openWindows_v1', JSON.stringify(state)); } catch(e) {}
+  }
+
+  _restoreState() {
+    try {
+      const raw = sessionStorage.getItem('saspHub_openWindows_v1');
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      const entries = Object.entries(state).sort((a, b) => (a[1].zIndex || 0) - (b[1].zIndex || 0));
+      this._restoring = true;
+      for (const [id, s] of entries) {
+        const app = APPS.find(a => a.id === id);
+        if (!app) continue;
+        this._pendingRestore[id] = s;
+        this.open(app);
+        delete this._pendingRestore[id];
+        const win = this.windows[id];
+        if (!win) continue;
+        if (s.maximized && s.prevRect) {
+          win.prevRect  = s.prevRect;
+          win.el.style.cssText = `width:100vw;height:calc(100vh - 48px);left:0;top:0;z-index:${win.el.style.zIndex}`;
+          win.el.classList.add('maximized');
+          win.maximized = true;
+        }
+        if (s.minimized) {
+          win.el.style.display = 'none';
+          win.minimized = true;
+          win.taskbarBtn?.classList.remove('active');
+          win.taskbarBtn?.classList.add('minimized');
+        }
+      }
+      this._restoring = false;
+      this._persistState();
+    } catch(e) { this._restoring = false; }
+  }
+
   // ── Global button listener ─────────────────────────────────
   _setupGlobalListeners() {
     document.addEventListener('click', e => {
@@ -412,6 +471,7 @@ const System = {
   logout() {
     localStorage.removeItem(Auth.KEY);
     sessionStorage.removeItem(Auth.KEY);
+    sessionStorage.removeItem('saspHub_openWindows_v1');
     Auth._data = null;
     sessionStorage.setItem('saspHub_skipBoot', '1');
     location.reload();
@@ -2445,6 +2505,7 @@ const Desktop = {
     WallpaperSettings.applyFromStorage();
     AvatarSettings.applyFromStorage();
     CalendarPopup.init();
+    this.wm._restoreState();
   },
 
 
@@ -2801,6 +2862,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Cleanup: if user didn't check "remember", clear localStorage on tab close
   window.addEventListener('pagehide', () => {
+    Desktop.wm?._persistState();
     if (sessionStorage.getItem(Auth.KEY + '_noremember')) {
       localStorage.removeItem(Auth.KEY);
     }
