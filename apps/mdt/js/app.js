@@ -196,7 +196,7 @@ const SASP = (() => {
       const off = entry.officer;
       const hasZP  = entry.protocol.some(p => p.removeZP);
       const hasRP  = entry.protocol.some(p => p.removeRP);
-      const needSZ = entry.totals.hasLife || entry.protocol.some(p => !p.isLife && p.jail > 20);
+      const needSZ = entry.totals.hasLife || entry.protocol.some(p => (!p.isLife && p.jail > 20) || p.hasSZ);
 
       const chargesHtml = entry.protocol.map(p => {
         const badges = [
@@ -285,7 +285,7 @@ const SASP = (() => {
       const totalF = entry.protocol.reduce((a, b) => a + b.fine, 0);
       const hasZP  = entry.protocol.some(p => p.removeZP);
       const hasRP  = entry.protocol.some(p => p.removeRP);
-      const needSZ = entry.totals.hasLife || entry.protocol.some(p => !p.isLife && p.jail > 20);
+      const needSZ = entry.totals.hasLife || entry.protocol.some(p => (!p.isLife && p.jail > 20) || p.hasSZ);
 
       let out = '';
       out += '════════════════════════════════════════\n';
@@ -405,6 +405,7 @@ const SASP = (() => {
         if (lEl && s.lastName)  lEl.value = s.lastName;
         if (bEl && s.birth)     bEl.value = s.birth;
         if (d.protocol?.length) UI.toast('✔ Rozpracovaný protokol obnoven');
+        _checkSaveBtn();
       } catch (e) {}
     }
   };
@@ -712,6 +713,7 @@ const SASP = (() => {
       _protocol.forEach(p => {
         if (p.isLife) { hasLife = true; needSZ = true; }
         else { totalJ += p.jail; if (p.jail > 20) needSZ = true; }
+        if (p.hasSZ) needSZ = true;
       });
 
       alert.style.display = needSZ ? 'flex' : 'none';
@@ -787,6 +789,7 @@ const SASP = (() => {
     const lifeToggle = !!p.lifeToggle;
     const badges = [
       (p.isLife && (!lifeToggle || p.isLifeFixed)) ? '<span class="badge badge-life">DOŽIVOTÍ</span>' : '',
+      p.hasSZ    ? '<span class="badge badge-sz">STÁTNÍ ZÁSTUPCE</span>' : '',
       p.removeZP ? '<span class="badge badge-zp">ODEBRAT ZP</span>' : '',
       p.removeRP ? '<span class="badge badge-rp">ODEBRAT ŘP</span>' : ''
     ].filter(Boolean).join('');
@@ -860,6 +863,7 @@ const SASP = (() => {
     _protocol.forEach(p => {
       if (p.isLife) { hasLife = true; needSZ = true; }
       else { totalJ += p.jail; if (p.jail > 20) needSZ = true; }
+      if (p.hasSZ) needSZ = true;
     });
     const totalF = _protocol.reduce((a, b) => a + b.fine, 0);
     document.getElementById('sumJail').textContent  = hasLife ? 'DOŽIVOTÍ' : totalJ + ' LET';
@@ -887,9 +891,12 @@ const SASP = (() => {
 
     _checkSZ(gi, si, jVal, fVal) {
       const s = _laws[gi].subs[si];
-      if (s.isLife || jVal > 20) {
+      if (s.isLife || jVal > 20 || s.hasSZ) {
+        const msg = s.hasSZ
+          ? `Tato položka vyžaduje přítomnost Státního Zástupce.\nJe přítomen?`
+          : `Trest přesahuje 20 let nebo je doživotní.\nJe přítomen Státní Zástupce?`;
         Modal.confirm('<i class="fa-solid fa-scale-balanced"></i>', 'STÁTNÍ ZÁSTUPCE',
-          `Trest přesahuje 20 let nebo je doživotní.\nJe přítomen Státní Zástupce?`,
+          msg,
           () => Protocol._commit(gi, si, jVal, fVal));
       } else {
         Protocol._commit(gi, si, jVal, fVal);
@@ -912,6 +919,7 @@ const SASP = (() => {
         isLife: _lt ? _lifeChosen : (s.isLife || _lifeChosen),
         isLifeFixed: _lt ? _lifeChosen : !!(s.isLife && s.minJ === 0),
         lifeToggle: _lt,
+        hasSZ: s.hasSZ || false,
         removeZP: s.removeZP,
         removeRP: s.removeRP,
         hasJ: s.hasJ || false,
@@ -1104,6 +1112,7 @@ const SASP = (() => {
             <label class="edit-check"><input type="checkbox" id="ef_hasJ" ${s.hasJ ? 'checked' : ''}> MÁ VAZBU</label>
             <label class="edit-check"><input type="checkbox" id="ef_hasF" ${s.hasF ? 'checked' : ''}> MÁ POKUTU</label>
             <label class="edit-check"><input type="checkbox" id="ef_isLife" ${s.isLife ? 'checked' : ''}> DOŽIVOTÍ</label>
+            <label class="edit-check"><input type="checkbox" id="ef_cz" ${s.hasSZ ? 'checked' : ''}> STÁTNÍ ZÁSTUPCE</label>
             <label class="edit-check"><input type="checkbox" id="ef_zp" ${s.removeZP ? 'checked' : ''}> ODEBRAT ZP</label>
             <label class="edit-check"><input type="checkbox" id="ef_rp" ${s.removeRP ? 'checked' : ''}> ODEBRAT ŘP</label>
           </div>
@@ -1148,6 +1157,7 @@ const SASP = (() => {
             <label class="edit-check"><input type="checkbox" id="ef_hasJ"> MÁ VAZBU</label>
             <label class="edit-check"><input type="checkbox" id="ef_hasF"> MÁ POKUTU</label>
             <label class="edit-check"><input type="checkbox" id="ef_isLife"> DOŽIVOTÍ</label>
+            <label class="edit-check"><input type="checkbox" id="ef_cz"> STÁTNÍ ZÁSTUPCE</label>
             <label class="edit-check"><input type="checkbox" id="ef_zp"> ODEBRAT ZP</label>
             <label class="edit-check"><input type="checkbox" id="ef_rp"> ODEBRAT ŘP</label>
           </div>
@@ -1703,7 +1713,7 @@ const SASP = (() => {
       const totalF = _protocol.reduce((a, b) => a + b.fine, 0);
       const hasZP  = _protocol.some(p => p.removeZP);
       const hasRP  = _protocol.some(p => p.removeRP);
-      const needSZ = hasLife || _protocol.some(p => p.jail > 20);
+      const needSZ = hasLife || _protocol.some(p => p.jail > 20 || p.hasSZ);
 
       let out = '';
       out += '════════════════════════════════════════\n';
@@ -2158,6 +2168,7 @@ const SASP = (() => {
         hasJ:      g('ef_hasJ')?.checked || false,
         hasF:      g('ef_hasF')?.checked || false,
         isLife:    g('ef_isLife')?.checked || false,
+        hasSZ:     g('ef_cz')?.checked || false,
         removeZP:  g('ef_zp')?.checked || false,
         removeRP:  g('ef_rp')?.checked || false,
         minF:      0,
@@ -2190,6 +2201,7 @@ const SASP = (() => {
       sub.hasJ     = g('ef_hasJ')?.checked || false;
       sub.hasF     = g('ef_hasF')?.checked || false;
       sub.isLife   = g('ef_isLife')?.checked || false;
+      sub.hasSZ    = g('ef_cz')?.checked || false;
       sub.removeZP = g('ef_zp')?.checked || false;
       sub.removeRP = g('ef_rp')?.checked || false;
       _buildFlat();
