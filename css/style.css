@@ -644,6 +644,94 @@ html, body {
 
 .tb-pin-btn.minimized { opacity: 0.5; }
 
+/* ── Taskbar Preview Popup ───────────────────────────────── */
+#tb-preview-popup.tb-preview-popup {
+  position: fixed;
+  bottom: 54px;
+  background: rgba(8, 18, 34, 0.96);
+  border: 1px solid rgba(var(--th-accent-rgb), 0.22);
+  border-radius: 8px;
+  padding: 8px;
+  z-index: 9998;
+  box-shadow: 0 -4px 28px rgba(0,0,0,0.72), 0 2px 8px rgba(0,0,0,0.5);
+  backdrop-filter: blur(20px);
+  pointer-events: auto;
+  opacity: 0;
+}
+
+#tb-preview-popup.tb-preview-label {
+  position: fixed;
+  bottom: 54px;
+  background: rgba(8, 18, 34, 0.93);
+  border: 1px solid rgba(var(--th-accent-rgb), 0.2);
+  border-radius: 5px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--th-text);
+  z-index: 9998;
+  box-shadow: 0 2px 14px rgba(0,0,0,0.55);
+  backdrop-filter: blur(16px);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* Animation only fires once the element is fully positioned */
+#tb-preview-popup.tb-preview-ready {
+  animation: tbPreviewIn 0.14s ease forwards;
+}
+
+@keyframes tbPreviewIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tb-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tb-preview-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--th-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 176px;
+}
+
+.tb-preview-close-btn {
+  width: 18px; height: 18px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--th-text-dim);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.tb-preview-close-btn:hover  { background: rgba(255,77,106,0.85); color: #fff; }
+
+.tb-preview-thumb {
+  cursor: pointer;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(var(--th-accent-rgb), 0.12);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.tb-preview-thumb:hover {
+  border-color: rgba(var(--th-accent-rgb), 0.5);
+  box-shadow: 0 0 0 2px rgba(var(--th-accent-rgb), 0.2);
+}
+
 /* ── Rubber-band Selection Box ───────────────────────────── */
 .selection-box {
   position: absolute;

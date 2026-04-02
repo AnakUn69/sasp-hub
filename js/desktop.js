@@ -2481,6 +2481,250 @@ const RubberBand = {
   }
 };
 
+// ── Taskbar Preview (Windows-style hover thumbnail + peek) ────
+const TaskbarPreview = {
+  _popup:      null,
+  _currentId:  null,
+  _showTimer:  null,
+  _hideTimer:  null,
+  _peeking:    false,
+
+  init() {
+    const taskbar = document.getElementById('taskbar');
+
+    taskbar.addEventListener('mouseover', e => {
+      const btn = e.target.closest('.tb-pin-btn, .tb-win-btn');
+      if (!btn) return;
+      const appId = btn.dataset.pinId || btn.dataset.appId;
+      if (!appId) return;
+      this._clearTimers();
+      if (this._currentId === appId && this._popup) return;
+      this._showTimer = setTimeout(() => this._show(btn, appId), 420);
+    });
+
+    taskbar.addEventListener('mouseout', e => {
+      const btn = e.target.closest('.tb-pin-btn, .tb-win-btn');
+      if (!btn) return;
+      const to = e.relatedTarget;
+      if (to?.closest?.('#tb-preview-popup')) return;
+      this._clearTimers();
+      this._scheduleHide();
+    });
+  },
+
+  _show(btn, appId) {
+    this._currentId = appId;
+    document.getElementById('tb-preview-popup')?.remove();
+
+    const win = Desktop.wm?.windows[appId];
+    const app = APPS.find(a => a.id === appId);
+    if (!app) return;
+
+    const popup = document.createElement('div');
+    popup.id = 'tb-preview-popup';
+
+    const btnRect = btn.getBoundingClientRect();
+    const cx = btnRect.left + btnRect.width / 2;
+
+    // thumbInner declared here so RAF closure can reach it in both branches
+    let thumbInner = null;
+
+    if (win && !win.minimized) {
+      popup.className = 'tb-preview-popup';
+
+      const header = document.createElement('div');
+      header.className = 'tb-preview-header';
+
+      const title = document.createElement('div');
+      title.className   = 'tb-preview-title';
+      title.textContent = app.name;
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'tb-preview-close-btn';
+      closeBtn.title     = 'Zavřít';
+      closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+      closeBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        Desktop.wm._close(appId);
+        this.hide();
+      });
+
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+
+      thumbInner = this._buildThumb(win);
+      const thumb = document.createElement('div');
+      thumb.className = 'tb-preview-thumb';
+      thumb.appendChild(thumbInner);
+
+      thumb.addEventListener('mouseenter', () => this._startPeek(appId));
+      thumb.addEventListener('mouseleave', () => this._endPeek());
+      thumb.addEventListener('click', () => {
+        if (win.minimized) Desktop.wm._unminimize(appId);
+        else               Desktop.wm._focus(appId);
+        this.hide();
+      });
+
+      popup.appendChild(header);
+      popup.appendChild(thumb);
+    } else {
+      // ── Not running or minimized: simple name label ───────
+      popup.className   = 'tb-preview-label';
+      popup.textContent = app.name;
+    }
+
+    // Add hidden first so browser can measure width but won't paint it
+    popup.style.visibility = 'hidden';
+    document.getElementById('desktop').appendChild(popup);
+    this._popup = popup;
+
+    popup.addEventListener('mouseenter', () => this._clearTimers());
+    popup.addEventListener('mouseleave', e => {
+      const to = e.relatedTarget;
+      if (to?.closest?.('.tb-pin-btn, .tb-win-btn')) return;
+      this._endPeek();
+      this._scheduleHide();
+    });
+
+    // RAF 1: position popup while still invisible
+    requestAnimationFrame(() => {
+      const pw   = popup.offsetWidth;
+      const rawL = cx - pw / 2;
+      const maxL = window.innerWidth - pw - 8;
+      popup.style.left = Math.max(8, Math.min(maxL, rawL)) + 'px';
+      popup.style.visibility = '';
+      popup.classList.add('tb-preview-ready');
+
+      // RAF 2: thumbnail clone is already at correct scale from frame 1;
+      // now fade it in so there is zero chance of seeing unscaled state
+      if (thumbInner) {
+        requestAnimationFrame(() => {
+          thumbInner.style.transition = 'opacity 0.1s ease';
+          thumbInner.style.opacity    = '1';
+        });
+      }
+    });
+  },
+
+  _buildThumb(win) {
+    const winEl = win.el;
+    const app   = win.app;
+    const W     = winEl.offsetWidth  || 800;
+    const H     = winEl.offsetHeight || 500;
+    const MAX_W = 224;
+    const MAX_H = 160;
+
+    // Scale to fit inside MAX_W × MAX_H, preserving aspect ratio
+    const scale = Math.min(MAX_W / W, MAX_H / H);
+    const tw    = Math.round(W * scale);
+    const th    = Math.round(H * scale);
+
+    // Titlebar height from the real element (fallback 32px)
+    const titlebarEl = winEl.querySelector('.win-titlebar');
+    const tbH = titlebarEl ? Math.round(titlebarEl.offsetHeight * scale) : 32;
+
+    // Build the thumbnail purely from scratch — no cloneNode, no CSS class baggage
+    const outer = document.createElement('div');
+    outer.style.cssText = [
+      `width:${tw}px`, `height:${th}px`,
+      'overflow:hidden', 'position:relative',
+      'border-radius:4px', 'flex-shrink:0',
+      'opacity:0',                    // faded in by _show() RAF
+      'border:1px solid rgba(255,255,255,0.07)',
+    ].join(';');
+
+    // ── Fake titlebar ──────────────────────────────────────
+    const tbBg = win.el.classList.contains('focused')
+      ? 'rgba(var(--th-accent-rgb),0.18)' : 'rgba(255,255,255,0.05)';
+    const tb = document.createElement('div');
+    tb.style.cssText = [
+      'position:absolute', 'top:0', 'left:0', `right:0`,
+      `height:${tbH}px`,
+      `background:${tbBg}`,
+      'display:flex', 'align-items:center', 'gap:5px',
+      `padding:0 ${Math.round(8 * scale)}px`,
+      'box-sizing:border-box',
+      `border-bottom:1px solid rgba(255,255,255,0.07)`,
+    ].join(';');
+
+    const iconSize = Math.max(8, Math.round(13 * scale));
+    const fontSize = Math.max(7, Math.round(12 * scale));
+    tb.innerHTML = `
+      <i class="${app.icon}" style="font-size:${iconSize}px;color:var(--th-accent,#4a9eff);opacity:0.85;flex-shrink:0;"></i>
+      <span style="font-size:${fontSize}px;color:var(--th-text,#fff);font-family:Inter,sans-serif;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;opacity:0.9;">${app.name}</span>
+    `;
+
+    // ── Window body ────────────────────────────────────────
+    const body = document.createElement('div');
+    body.style.cssText = [
+      'position:absolute', `top:${tbH}px`, 'left:0', 'right:0', 'bottom:0',
+      'background:linear-gradient(170deg,#081422 0%,#0b1a2d 100%)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+    ].join(';');
+
+    if (win.minimized) {
+      body.innerHTML = `<i class="${app.icon}" style="font-size:${Math.round(28*scale)}px;opacity:0.18;color:var(--th-text,#fff);"></i>`;
+    } else {
+      body.innerHTML = `<i class="${app.icon}" style="font-size:${Math.round(28*scale)}px;opacity:0.12;color:var(--th-accent,#4a9eff);"></i>`;
+    }
+
+    outer.appendChild(tb);
+    outer.appendChild(body);
+    return outer;
+  },
+
+  _startPeek(activeId) {
+    if (this._peeking) return;
+    this._peeking = true;
+    Object.entries(Desktop.wm.windows).forEach(([id, win]) => {
+      if (id === activeId) return;
+      win.el.style.transition = 'opacity 0.15s ease';
+      win.el.style.opacity    = '0.06';
+    });
+    const icons = document.getElementById('desktopIcons');
+    if (icons) {
+      icons.style.transition = 'opacity 0.15s ease';
+      icons.style.opacity    = '0.06';
+    }
+  },
+
+  _endPeek() {
+    if (!this._peeking) return;
+    this._peeking = false;
+    Object.values(Desktop.wm.windows).forEach(win => {
+      win.el.style.transition = 'opacity 0.2s ease';
+      win.el.style.opacity    = '';
+      setTimeout(() => { win.el.style.transition = ''; }, 220);
+    });
+    const icons = document.getElementById('desktopIcons');
+    if (icons) {
+      icons.style.transition = 'opacity 0.2s ease';
+      icons.style.opacity    = '';
+      setTimeout(() => { icons.style.transition = ''; }, 220);
+    }
+  },
+
+  hide() {
+    this._endPeek();
+    this._clearTimers();
+    document.getElementById('tb-preview-popup')?.remove();
+    this._popup     = null;
+    this._currentId = null;
+  },
+
+  _clearTimers() {
+    clearTimeout(this._showTimer);
+    clearTimeout(this._hideTimer);
+    this._showTimer = null;
+    this._hideTimer = null;
+  },
+
+  _scheduleHide() {
+    this._hideTimer = setTimeout(() => this.hide(), 180);
+  }
+};
+
 // ── Desktop ───────────────────────────────────────────────────
 const Desktop = {
   wm: null,
@@ -2505,6 +2749,7 @@ const Desktop = {
     WallpaperSettings.applyFromStorage();
     AvatarSettings.applyFromStorage();
     CalendarPopup.init();
+    TaskbarPreview.init();
     this.wm._restoreState();
   },
 
