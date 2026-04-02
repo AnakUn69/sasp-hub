@@ -131,6 +131,7 @@ const SASP = (() => {
     },
     save() {
       if (!this._saveEntry()) { UI.toast('Protokol je prázdný!'); return; }
+      Draft.clear();
       UI.toast('✓ Protokol uložen do historie');
     },
 
@@ -340,6 +341,7 @@ const SASP = (() => {
           _updateTotals();
           Render.protocol();
           _checkSaveBtn();
+          Draft.save();
           this.close();
           UI.toast('✔ Protokol načten z historie');
         }
@@ -358,6 +360,52 @@ const SASP = (() => {
           UI.toast('Protokol smazán');
         }
       );
+    }
+  };
+
+  // ── Draft autosave ────────────────────────────────────────
+  // Persists the active (unsaved) protocol + suspect fields to localStorage
+  // so a page refresh restores the work-in-progress state.
+  const Draft = {
+    KEY: 'sasp_mdt_draft_v1',
+
+    save() {
+      try {
+        const g = id => document.getElementById(id)?.value || '';
+        localStorage.setItem(this.KEY, JSON.stringify({
+          protocol: JSON.parse(JSON.stringify(_protocol)),
+          suspect: {
+            firstName: g('suspectFirst'),
+            lastName:  g('suspectLast'),
+            birth:     g('suspectBirth')
+          }
+        }));
+      } catch (e) {}
+    },
+
+    clear() {
+      try { localStorage.removeItem(this.KEY); } catch (e) {}
+    },
+
+    restore() {
+      try {
+        const raw = localStorage.getItem(this.KEY);
+        if (!raw) return;
+        const d = JSON.parse(raw);
+        if (!d || (!d.protocol?.length && !d.suspect?.firstName && !d.suspect?.lastName)) return;
+        if (d.protocol?.length) {
+          _protocol = d.protocol;
+          Render.protocol();
+        }
+        const s = d.suspect || {};
+        const fEl = document.getElementById('suspectFirst');
+        const lEl = document.getElementById('suspectLast');
+        const bEl = document.getElementById('suspectBirth');
+        if (fEl && s.firstName) fEl.value = s.firstName;
+        if (lEl && s.lastName)  lEl.value = s.lastName;
+        if (bEl && s.birth)     bEl.value = s.birth;
+        if (d.protocol?.length) UI.toast('✔ Rozpracovaný protokol obnoven');
+      } catch (e) {}
     }
   };
 
@@ -539,6 +587,7 @@ const SASP = (() => {
         Render.categories();
         Render.laws();
         Render.protocol();
+        Draft.restore();
         setInterval(() => UI.updateClock(), 1000);
         UI.updateClock();
       });
@@ -856,6 +905,7 @@ const SASP = (() => {
       });
       Modal.close();
       Render.protocol();
+      Draft.save();
       UI.toast('Přidáno: ' + law.title + ' ' + s.label);
     }
   };
@@ -1753,7 +1803,13 @@ const SASP = (() => {
   // ── Public API ────────────────────────────────────────────
   return {
     /* Init */
-    init() { Boot.start(); },
+    init() {
+      // Autosave draft on suspect field changes
+      ['suspectFirst', 'suspectLast', 'suspectBirth'].forEach(id => {
+        document.getElementById(id)?.addEventListener('input', () => Draft.save());
+      });
+      Boot.start();
+    },
 
     login() {
       const badge     = document.getElementById('loginBadge')?.value?.trim();
@@ -1772,6 +1828,7 @@ const SASP = (() => {
         Render.categories();
         Render.laws();
         Render.protocol();
+        Draft.restore();
         setInterval(() => UI.updateClock(), 1000);
         UI.updateClock();
       });
@@ -1791,6 +1848,7 @@ const SASP = (() => {
     removeCharge(id) {
       _protocol = _protocol.filter(p => p.id !== id);
       Render.protocol();
+      Draft.save();
     },
     copyProtocol() { Clip.copy(); },
     saveProtocol()  { ProtocolHistory.save(); },
@@ -1854,6 +1912,7 @@ const SASP = (() => {
         () => {
           _protocol = [];
           Render.protocol();
+          Draft.clear();
         }
       );
     },
@@ -2122,6 +2181,7 @@ const SASP = (() => {
       }
       _updateTotals();
       _checkSaveBtn();
+      Draft.save();
     },
 
     switchOrCard(pid, choice) {
