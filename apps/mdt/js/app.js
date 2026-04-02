@@ -784,8 +784,9 @@ const SASP = (() => {
   }
 
   function _card(p) {
+    const lifeToggle = !!p.lifeToggle;
     const badges = [
-      p.isLife   ? '<span class="badge badge-life">DOŽIVOTÍ</span>' : '',
+      (p.isLife && (!lifeToggle || p.isLifeFixed)) ? '<span class="badge badge-life">DOŽIVOTÍ</span>' : '',
       p.removeZP ? '<span class="badge badge-zp">ODEBRAT ZP</span>' : '',
       p.removeRP ? '<span class="badge badge-rp">ODEBRAT ŘP</span>' : ''
     ].filter(Boolean).join('');
@@ -794,6 +795,23 @@ const SASP = (() => {
 
     // Jail chip: fixed doživotní = static label already in badge, otherwise editable input
     const jailChip = (() => {
+      if (lifeToggle) {
+        const lifeActive = p.isLifeFixed;
+        const toggleHtml = `<div class="card-or-toggle">
+          <button class="card-or-btn${!lifeActive ? ' card-or-btn--active' : ''}" onclick="SASP.switchLifeCard(${pid},'years')">${p.minJ}+ LET</button>
+          <span class="card-or-sep">NEBO</span>
+          <button class="card-or-btn${lifeActive ? ' card-or-btn--active' : ''}" onclick="SASP.switchLifeCard(${pid},'life')">DOŽIVOTÍ</button>
+        </div>`;
+        if (lifeActive) return toggleHtml;
+        return toggleHtml + `<div class="card-chip">
+          <span class="chip-lbl">VAZBA</span>
+          <input type="number" class="card-input card-input-jail"
+            data-pid="${pid}" data-field="jail"
+            value="${p.jail || p.minJ}" min="${p.minJ}"
+            oninput="SASP.updateCharge(this.dataset.pid,'jail',this.value)">
+          <span class="chip-unit">LET</span>
+        </div>`;
+      }
       if (p.isLifeFixed) return ''; // badge already shows DOŽIVOTÍ
       if (p.isLife && p.jail > 0) {
         return `<div class="card-chip"><span class="card-life">${p.jail} LET – DOŽIVOTÍ</span></div>`;
@@ -882,15 +900,18 @@ const SASP = (() => {
       ChargeModal.close();
       const law = _laws[gi];
       const s = law.subs[si];
+      const _lt = !!(s.isLife && s.minJ > 0);
+      const _lifeChosen = jVal >= 99;
       _protocol.push({
         id: Date.now() + Math.random(),
         title: law.title,
         subLabel: s.label,
         text: s.text,
-        jail: jVal,
+        jail: _lifeChosen ? 0 : jVal,
         fine: fVal,
-        isLife: s.isLife || jVal >= 99,
-        isLifeFixed: !!(s.isLife && s.minJ === 0),
+        isLife: _lt ? _lifeChosen : (s.isLife || _lifeChosen),
+        isLifeFixed: _lt ? _lifeChosen : !!(s.isLife && s.minJ === 0),
+        lifeToggle: _lt,
         removeZP: s.removeZP,
         removeRP: s.removeRP,
         hasJ: s.hasJ || false,
@@ -1201,6 +1222,7 @@ const SASP = (() => {
     _gi: null,
     _si: null,
     _orChoice: null,   // 'jail' | 'fine' | null
+    _lifeChoice: null, // 'years' | 'life' | null  (isLife && minJ > 0)
 
     open(gi, si) {
       this._gi = gi;
@@ -1208,11 +1230,13 @@ const SASP = (() => {
       const s = _laws[gi].subs[si];
       const orMode = s.hasJ && s.hasF && s.fixedJail === null && s.fixedFine === null
                    && s.text.includes('nebo');
-      this._orChoice = orMode ? 'jail' : null;
+      const lifeToggle = !!(s.isLife && s.minJ > 0 && s.fixedJail === null);
+      this._orChoice   = orMode      ? 'jail'  : null;
+      this._lifeChoice = lifeToggle  ? 'years' : null;
       this._render(_laws[gi], s);
-      const needsJail = s.hasJ && !s.isLife && s.fixedJail === null;
+      const needsJail = s.hasJ && !(s.isLife && s.minJ === 0) && s.fixedJail === null;
       const needsFine = s.hasF && s.fixedFine === null && (s.minF || 0) > 0;
-      this._setConfirmEnabled(orMode ? false : (!needsJail && !needsFine));
+      this._setConfirmEnabled(orMode || lifeToggle ? false : (!needsJail && !needsFine));
       document.getElementById('chargeOverlay').style.display = 'flex';
       setTimeout(() => {
         this._attachListeners();
@@ -1256,6 +1280,21 @@ const SASP = (() => {
           if (maxF > 0 && fVal > maxF) { this._setError('cm_fine', `Maximum je ${maxF.toLocaleString('cs-CZ')} $.`); return; }
         }
         this._clearError('cm_jail'); this._clearError('cm_fine');
+        Protocol.add(this._gi, this._si, jVal, fVal);
+        return;
+      }
+
+      // Life toggle mode (isLife && minJ > 0) — user chose years or doživotí
+      if (this._lifeChoice !== null) {
+        if (this._lifeChoice === 'life') {
+          this._clearError('cm_jail');
+          Protocol.add(this._gi, this._si, 99, fVal);
+          return;
+        }
+        // choice = 'years'
+        if (jVal === 0) { this._setError('cm_jail', `Zadejte délku trestu (min. ${s.minJ} let).`); return; }
+        if (s.minJ > 0 && jVal < s.minJ) { this._setError('cm_jail', `Minimum je ${s.minJ} let.`); return; }
+        this._clearError('cm_jail');
         Protocol.add(this._gi, this._si, jVal, fVal);
         return;
       }
@@ -1314,13 +1353,23 @@ const SASP = (() => {
                    && s.text.includes('nebo');
 
       let jOk = true, jFilled = false;
-      if (s.hasJ && !s.isLife && s.fixedJail === null && jEl) {
-        const v = parseInt(jEl.value) || 0;
-        jFilled = v > 0;
-        jOk = v === 0 || (
-          (s.minJ <= 0 || v >= s.minJ)
-          && (s.maxJ <= 0 || s.maxJ >= 99 || v <= s.maxJ)
-        );
+      if (s.hasJ && s.fixedJail === null && jEl) {
+        if (this._lifeChoice !== null) {
+          if (this._lifeChoice === 'life') {
+            jFilled = true; jOk = true;
+          } else {
+            const v = parseInt(jEl.value) || 0;
+            jFilled = v > 0;
+            jOk = v === 0 || (s.minJ <= 0 || v >= s.minJ);
+          }
+        } else if (!s.isLife) {
+          const v = parseInt(jEl.value) || 0;
+          jFilled = v > 0;
+          jOk = v === 0 || (
+            (s.minJ <= 0 || v >= s.minJ)
+            && (s.maxJ <= 0 || s.maxJ >= 99 || v <= s.maxJ)
+          );
+        }
       }
 
       let fOk = true, fFilled = false;
@@ -1341,7 +1390,7 @@ const SASP = (() => {
         this._setConfirmEnabled(activeFilled && activeOk);
       } else {
         // Both must be filled (if required) and in range
-        const jReq = s.hasJ && !s.isLife && s.fixedJail === null;
+        const jReq = s.hasJ && !(s.isLife && s.minJ === 0) && s.fixedJail === null;
         const fReq = s.hasF && s.fixedFine === null && (s.minF || 0) > 0;
         this._setConfirmEnabled(
           (!jReq || jFilled) && (!fReq || fFilled) && jOk && fOk
@@ -1379,18 +1428,25 @@ const SASP = (() => {
       const jEl = document.getElementById('cm_jail');
       const fEl = document.getElementById('cm_fine');
 
-      if (jEl && s.hasJ && !s.isLife && s.fixedJail === null) {
+      if (jEl && s.hasJ && s.fixedJail === null && (this._lifeChoice !== null || !s.isLife)) {
         jEl.addEventListener('input', () => {
           this._clearError('cm_jail');
           const v = parseInt(jEl.value) || 0;
-          const jOk = v > 0
-            && (s.minJ <= 0 || v >= s.minJ)
-            && (s.maxJ <= 0 || s.maxJ >= 99 || v <= s.maxJ);
-          if (!jOk && v > 0) {
-            if (s.minJ > 0 && v < s.minJ) {
-              this._setError('cm_jail', `Minimum je ${s.minJ} let (max. ${s.maxJ} let).`);
-            } else if (s.maxJ > 0 && s.maxJ < 99 && v > s.maxJ) {
-              this._setError('cm_jail', `Maximum je ${s.maxJ} let.`);
+          if (this._lifeChoice !== null) {
+            // lifeToggle years mode — only min check, no max
+            if (v > 0 && s.minJ > 0 && v < s.minJ) {
+              this._setError('cm_jail', `Minimum je ${s.minJ} let.`);
+            }
+          } else {
+            const jOk = v > 0
+              && (s.minJ <= 0 || v >= s.minJ)
+              && (s.maxJ <= 0 || s.maxJ >= 99 || v <= s.maxJ);
+            if (!jOk && v > 0) {
+              if (s.minJ > 0 && v < s.minJ) {
+                this._setError('cm_jail', `Minimum je ${s.minJ} let (max. ${s.maxJ} let).`);
+              } else if (s.maxJ > 0 && s.maxJ < 99 && v > s.maxJ) {
+                this._setError('cm_jail', `Maximum je ${s.maxJ} let.`);
+              }
             }
           }
           this._updateConfirmState();
@@ -1440,13 +1496,27 @@ const SASP = (() => {
             <div class="cm-fixed" style="color:var(--danger)">DOŽIVOTÍ</div>
           </div>`;
         } else {
-          const ph = range ? range : 'zadejte počet let';
-          const maxAttr = s.maxJ > 0 && !s.isLife ? `max="${s.maxJ}"` : '';
-          inputsHtml += `<div class="cm-field" id="cm_jail_wrap">
-            <label class="cm-label">VAZBA (roky)${range ? ` <span class="cm-range-hint">${range}</span>` : ''}</label>
-            <input type="number" id="cm_jail" class="cm-input cm-input-jail"
-              placeholder="${ph}" min="${s.minJ}" ${maxAttr} autocomplete="off">
-          </div>`;
+          const lifeToggle = s.isLife && s.minJ > 0;
+          if (lifeToggle) {
+            inputsHtml += `<div class="cm-or-toggle">
+              <button class="cm-or-btn cm-or-btn--active" id="cm_life_years" onclick="SASP._cmLifeSwitch('years')">${s.minJ}+ LET</button>
+              <span class="cm-or-sep">NEBO</span>
+              <button class="cm-or-btn" id="cm_life_doz" onclick="SASP._cmLifeSwitch('life')">DOŽIVOTÍ</button>
+            </div>`;
+            inputsHtml += `<div class="cm-field" id="cm_jail_wrap">
+              <label class="cm-label">VAZBA (roky) <span class="cm-range-hint">min. ${s.minJ} let</span></label>
+              <input type="number" id="cm_jail" class="cm-input cm-input-jail"
+                placeholder="min. ${s.minJ} let" min="${s.minJ}" autocomplete="off">
+            </div>`;
+          } else {
+            const ph = range ? range : 'zadejte počet let';
+            const maxAttr = s.maxJ > 0 ? `max="${s.maxJ}"` : '';
+            inputsHtml += `<div class="cm-field" id="cm_jail_wrap">
+              <label class="cm-label">VAZBA (roky)${range ? ` <span class="cm-range-hint">${range}</span>` : ''}</label>
+              <input type="number" id="cm_jail" class="cm-input cm-input-jail"
+                placeholder="${ph}" min="${s.minJ}" ${maxAttr} autocomplete="off">
+            </div>`;
+          }
         }
       }
 
@@ -1512,6 +1582,32 @@ const SASP = (() => {
       }
       if (jBtn) jBtn.classList.toggle('cm-or-btn--active', choice === 'jail');
       if (fBtn) fBtn.classList.toggle('cm-or-btn--active', choice === 'fine');
+      this._updateConfirmState();
+    },
+
+    _cmLifeSwitch(choice) {
+      if (this._lifeChoice === null) return;
+      this._lifeChoice = choice;
+      const s = _laws[this._gi].subs[this._si];
+      const jWrap    = document.getElementById('cm_jail_wrap');
+      const yearsBtn = document.getElementById('cm_life_years');
+      const lifeBtn  = document.getElementById('cm_life_doz');
+      if (jWrap) jWrap.style.display = choice === 'years' ? '' : 'none';
+      const jEl = document.getElementById('cm_jail');
+      if (choice === 'life') {
+        if (jEl) { jEl.value = ''; this._clearError('cm_jail'); }
+      } else {
+        if (jEl) {
+          if ((parseInt(jEl.value) || 0) === 0 && s.minJ > 0) {
+            jEl.value = s.minJ;
+            jEl.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          this._clearError('cm_jail');
+          jEl.focus();
+        }
+      }
+      if (yearsBtn) yearsBtn.classList.toggle('cm-or-btn--active', choice === 'years');
+      if (lifeBtn)  lifeBtn.classList.toggle('cm-or-btn--active', choice === 'life');
       this._updateConfirmState();
     }
   };
@@ -2168,9 +2264,12 @@ const SASP = (() => {
       if (field === 'jail') {
         let valid = true;
         if (p.minJ > 0 && val < p.minJ) valid = false;
-        if (p.maxJ > 0 && p.maxJ < 99 && val > p.maxJ) valid = false;
+        if (!p.lifeToggle && p.maxJ > 0 && p.maxJ < 99 && val > p.maxJ) valid = false;
         if (input) input.classList.toggle('input-error', !valid);
-        if (valid) { p.jail = val; p.isLife = p.isLifeFixed || val >= 99; }
+        if (valid) {
+          p.jail = val;
+          if (!p.lifeToggle) p.isLife = p.isLifeFixed || val >= 99;
+        }
       } else if (field === 'fine') {
         if (p.orMode && p.orChoice !== 'fine') return; // OR mode safeguard
         const minF = p.minF || 0;
@@ -2199,7 +2298,25 @@ const SASP = (() => {
       Render.protocol();
     },
 
-    _cmOrSwitch(choice) { ChargeModal._cmOrSwitch(choice); }
+    switchLifeCard(pid, choice) {
+      const p = _protocol.find(x => String(x.id) === String(pid));
+      if (!p || !p.lifeToggle) return;
+      if (choice === 'life') {
+        p.isLifeFixed = true;
+        p.isLife = true;
+        p.jail = 0;
+      } else {
+        p.isLifeFixed = false;
+        p.isLife = false;
+        if (p.jail === 0 && p.minJ > 0) p.jail = p.minJ;
+      }
+      _updateTotals();
+      Render.protocol();
+      Draft.save();
+    },
+
+    _cmOrSwitch(choice)  { ChargeModal._cmOrSwitch(choice); },
+    _cmLifeSwitch(choice) { ChargeModal._cmLifeSwitch(choice); }
   };
 })();
 
