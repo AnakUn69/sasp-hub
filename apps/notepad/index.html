@@ -953,6 +953,18 @@
     /* ── Init ───────────────────────────────────────────────── */
     loadNotes();
     if (notes.length > 0) selectNote(notes[0].id);
+
+    /* ── Hub messages ───────────────────────────────────────── */
+    window.addEventListener('message', e => {
+      if (e.data?.type === 'focusNote' && e.data.id) {
+        loadNotes();
+        selectNote(e.data.id);
+      }
+      if (e.data?.type === 'reloadNotes') {
+        loadNotes();
+        renderList();
+      }
+    });
   </script>
   <script src="../../js/themes.js"></script>
 

@@ -777,8 +777,8 @@ const WallpaperSettings = {
   }
 };
 // ── Desktop Grid ────────────────────────────────────────────
-const GRID_W  = 96;
-const GRID_H  = 90;
+const GRID_W  = 106;
+const GRID_H  = 112;
 const GRID_PX = 14;
 const GRID_PY = 14;
 
@@ -870,6 +870,25 @@ const DesktopItems = {
     setTimeout(() => DesktopItems.rename(el), 80);
   },
 
+  createNotepadNote(dropX, dropY, noteId) {
+    const id = 'custom_' + noteId;
+    let name = 'Nová poznámka';
+    let n = 1;
+    const used = this._items.map(i => i.name);
+    while (used.includes(name)) { n++; name = `Nová poznámka (${n})`; }
+    const item = { id, type: 'notepadnote', name, noteId, folderId: null };
+    this._items.push(item);
+    if (dropX != null) {
+      const s = gridSnap(dropX, dropY);
+      this._positions[id] = { x: s.x, y: s.y };
+    }
+    this._save(); this._savePos();
+    const el = this._buildIconEl(item);
+    this._appendToDesktop(el, id);
+    IconDrag.setup(el);
+    setTimeout(() => DesktopItems.rename(el, () => QuickNote.openNote(noteId)), 80);
+  },
+
   remove(id, iconEl) {
     // Send to Trash instead of permanent delete
     iconEl.remove();
@@ -877,7 +896,7 @@ const DesktopItems = {
     Object.keys(FolderManager._explorerWins).forEach(wid => FolderManager._refreshAll(wid));
   },
 
-  rename(iconEl) {
+  rename(iconEl, onCommit) {
     const labelEl = iconEl.querySelector('.di-label');
     if (!labelEl) return;
     const prev = labelEl.textContent;
@@ -900,10 +919,24 @@ const DesktopItems = {
         customItem.name = newName;
         this._save();
         FolderManager.updateTitle(id, newName);
+        if (customItem.type === 'notepadnote' && customItem.noteId) {
+          try {
+            const raw = localStorage.getItem(QuickNote.STORAGE_KEY);
+            const noteArr = raw ? JSON.parse(raw) : [];
+            const noteEntry = noteArr.find(n => n.id === customItem.noteId);
+            if (noteEntry) {
+              noteEntry.title = newName;
+              localStorage.setItem(QuickNote.STORAGE_KEY, JSON.stringify(noteArr));
+              const iframe = document.querySelector('.window[data-app-id="notepad"] .win-iframe');
+              iframe?.contentWindow?.postMessage({ type: 'reloadNotes' }, '*');
+            }
+          } catch (e) {}
+        }
       } else {
         this._names[id] = newName;
         this._saveNames();
       }
+      onCommit?.();
     };
 
     input.addEventListener('blur', commit);
@@ -926,6 +959,8 @@ const DesktopItems = {
         width:     640, height: 460, minWidth: 320, minHeight: 200
       };
       Desktop.wm.open(fakeApp);
+    } else if (item.type === 'notepadnote') {
+      QuickNote.openNote(item.noteId);
     }
   },
 
@@ -1768,9 +1803,9 @@ const ContextMenu = {
         action: () => DesktopItems.createFolder(x, y)
       },
       {
-        icon:   'fa-solid fa-file-circle-plus',
-        label:  'Nový textový dokument',
-        action: () => DesktopItems.createTextDoc(x, y)
+        icon:   'fa-solid fa-file-lines',
+        label:  'Nová poznámka',
+        action: () => QuickNote.create(x, y)
       },
       {
         icon:   'fa-solid fa-note-sticky',
@@ -1876,6 +1911,43 @@ const ContextMenu = {
     }
 
     this._show(x, y, items);
+  }
+};
+
+// ── Quick Notepad Note ────────────────────────────────────────
+const QuickNote = {
+  STORAGE_KEY: 'saspHub_notepad_v1',
+
+  create(dropX, dropY) {
+    // Create the note in Notepad storage
+    let notes = [];
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      notes = raw ? JSON.parse(raw) : [];
+    } catch (e) {}
+
+    const noteId = Date.now().toString();
+    const note = { id: noteId, title: '', content: '', updated: new Date().toISOString() };
+    notes.unshift(note);
+
+    try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(notes)); } catch (e) {}
+
+    // Create a desktop icon linked to this note
+    DesktopItems.createNotepadNote(dropX, dropY, noteId);
+  },
+
+  openNote(noteId) {
+    const notepadApp = APPS.find(a => a.id === 'notepad');
+    if (notepadApp) Desktop.wm.open(notepadApp);
+    const tryFocus = (attempts) => {
+      const iframe = document.querySelector('.window[data-app-id="notepad"] .win-iframe');
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: 'focusNote', id: noteId }, '*');
+      } else if (attempts > 0) {
+        setTimeout(() => tryFocus(attempts - 1), 200);
+      }
+    };
+    setTimeout(() => tryFocus(10), 150);
   }
 };
 
