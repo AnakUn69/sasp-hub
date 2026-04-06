@@ -4,6 +4,41 @@
    SASP HUB OS — Desktop Environment
    ============================================================ */
 
+// ── Responsive Scale System ──────────────────────────────────
+// The entire #desktop is scaled via CSS transform so the OS
+// fits any viewport size. All mouse events report viewport
+// coordinates; offsetLeft/Top report desktop (pre-transform)
+// coordinates. Use _mx() to convert viewport→desktop space.
+let DESKTOP_REF_W = 1920;
+let DESKTOP_REF_H = 1080;
+let _desktopScale = 1;
+
+function _mx(v) { return v / _desktopScale; }
+
+function _updateDesktopScale() {
+  const s = Math.min(window.innerWidth / DESKTOP_REF_W, window.innerHeight / DESKTOP_REF_H);
+  _desktopScale = Math.max(0.25, s); // floor at 25%, no ceiling (scales up on bigger screens)
+  const desktop = document.getElementById('desktop');
+  if (!desktop) return;
+  desktop.style.width     = (window.innerWidth  / _desktopScale) + 'px';
+  desktop.style.height    = (window.innerHeight / _desktopScale) + 'px';
+  desktop.style.transform = `scale(${_desktopScale})`;
+
+  // Re-maximize any currently maximized windows to fill the new desktop size
+  if (typeof Desktop !== 'undefined' && Desktop.wm) {
+    const newW = Math.round(window.innerWidth  / _desktopScale);
+    const newH = Math.round(window.innerHeight / _desktopScale);
+    for (const win of Object.values(Desktop.wm.windows)) {
+      if (win.maximized) {
+        win.el.style.width  = newW + 'px';
+        win.el.style.height = (newH - 48) + 'px';
+      }
+    }
+  }
+}
+
+window.addEventListener('resize', _updateDesktopScale);
+
 // ── App Manifest ────────────────────────────────────────────
 const APPS = [
   {
@@ -180,12 +215,14 @@ class WindowManager {
     // Calculate position (cascade stagger or restored values)
     const restore = this._pendingRestore[app.id];
     const count = Object.keys(this.windows).length;
-    const maxW = window.innerWidth  - 80;
-    const maxH = window.innerHeight - 90;
+    const dW    = window.innerWidth  / _desktopScale;
+    const dH    = window.innerHeight / _desktopScale;
+    const maxW  = dW - 80;
+    const maxH  = dH - 90;
     const w = restore ? restore.width  : Math.min(app.width  || 1000, maxW);
     const h = restore ? restore.height : Math.min(app.height || 700,  maxH);
-    const x = restore ? restore.left   : Math.max(20, Math.round((window.innerWidth  - w) / 2) + count * 28);
-    const y = restore ? restore.top    : Math.max(10, Math.round((window.innerHeight - 48 - h) / 2) + count * 22);
+    const x = restore ? restore.left   : Math.max(20, Math.round((dW - w) / 2) + count * 28);
+    const y = restore ? restore.top    : Math.max(10, Math.round((dH - 48 - h) / 2) + count * 22);
 
     // Build window element
     const el = document.createElement('div');
@@ -314,7 +351,9 @@ class WindowManager {
         w: win.el.offsetWidth,  h: win.el.offsetHeight,
         x: win.el.offsetLeft,   y: win.el.offsetTop
       };
-      win.el.style.cssText = `width:100vw;height:calc(100vh - 48px);left:0;top:0;z-index:${win.el.style.zIndex}`;
+      const mdW = Math.round(window.innerWidth  / _desktopScale);
+      const mdH = Math.round(window.innerHeight / _desktopScale);
+      win.el.style.cssText = `width:${mdW}px;height:${mdH - 48}px;left:0;top:0;z-index:${win.el.style.zIndex}`;
       win.el.classList.add('maximized');
       win.maximized = true;
     }
@@ -355,7 +394,7 @@ class WindowManager {
     });
     btn.addEventListener('contextmenu', e => {
       e.preventDefault(); e.stopPropagation();
-      ContextMenu._showTaskbarWinMenu(e.clientX, e.clientY, app.id);
+      ContextMenu._showTaskbarWinMenu(_mx(e.clientX), _mx(e.clientY), app.id);
     });
     document.getElementById('taskbarWindows').appendChild(btn);
     this.windows[app.id].taskbarBtn = btn;
@@ -369,11 +408,11 @@ class WindowManager {
       if (!win || win.maximized) return;
       e.preventDefault();
       this._focus(id);
-      const ox = e.clientX - winEl.offsetLeft;
-      const oy = e.clientY - winEl.offsetTop;
+      const ox = _mx(e.clientX) - winEl.offsetLeft;
+      const oy = _mx(e.clientY) - winEl.offsetTop;
       const onMove = e => {
-        winEl.style.left = (e.clientX - ox) + 'px';
-        winEl.style.top  = Math.max(0, e.clientY - oy) + 'px';
+        winEl.style.left = (_mx(e.clientX) - ox) + 'px';
+        winEl.style.top  = Math.max(0, _mx(e.clientY) - oy) + 'px';
       };
       const stopDrag = () => {
         document.removeEventListener('mousemove', onMove);
@@ -410,10 +449,10 @@ class WindowManager {
         const onMove = e => {
           let newW = sw, newH = sh, newX = initLeft, newY = initTop;
           // Compute size directly from mouse→fixed-edge distance → no dead zone at min size
-          if (dir.includes('e')) { newW = Math.max(minW, e.clientX - initLeft);  }
-          if (dir.includes('s')) { newH = Math.max(minH, e.clientY - initTop);   }
-          if (dir.includes('w')) { newW = Math.max(minW, rightEdge  - e.clientX); newX = rightEdge  - newW; }
-          if (dir.includes('n')) { newH = Math.max(minH, bottomEdge - e.clientY); newY = bottomEdge - newH; }
+          if (dir.includes('e')) { newW = Math.max(minW, _mx(e.clientX) - initLeft);  }
+          if (dir.includes('s')) { newH = Math.max(minH, _mx(e.clientY) - initTop);   }
+          if (dir.includes('w')) { newW = Math.max(minW, rightEdge  - _mx(e.clientX)); newX = rightEdge  - newW; }
+          if (dir.includes('n')) { newH = Math.max(minH, bottomEdge - _mx(e.clientY)); newY = bottomEdge - newH; }
           winEl.style.width  = newW + 'px';
           winEl.style.height = newH + 'px';
           winEl.style.left   = newX + 'px';
@@ -472,7 +511,9 @@ class WindowManager {
         if (!win) continue;
         if (s.maximized && s.prevRect) {
           win.prevRect  = s.prevRect;
-          win.el.style.cssText = `width:100vw;height:calc(100vh - 48px);left:0;top:0;z-index:${win.el.style.zIndex}`;
+          const rsW = Math.round(window.innerWidth  / _desktopScale);
+          const rsH = Math.round(window.innerHeight / _desktopScale);
+          win.el.style.cssText = `width:${rsW}px;height:${rsH - 48}px;left:0;top:0;z-index:${win.el.style.zIndex}`;
           win.el.classList.add('maximized');
           win.maximized = true;
         }
@@ -796,7 +837,7 @@ function gridFreeSlot(excludeIds = []) {
     const row = Math.max(0, Math.round((pos.y - GRID_PY) / GRID_H));
     used.add(`${col},${row}`);
   });
-  const maxRows = Math.max(3, Math.floor((window.innerHeight - 48 - GRID_PY * 2) / GRID_H));
+  const maxRows = Math.max(3, Math.floor((window.innerHeight / _desktopScale - 48 - GRID_PY * 2) / GRID_H));
   for (let col = 0; col < 30; col++) {
     for (let row = 0; row < maxRows; row++) {
       if (!used.has(`${col},${row}`)) return { x: GRID_PX + col * GRID_W, y: GRID_PY + row * GRID_H };
@@ -1053,8 +1094,10 @@ const FolderManager = {
     const name  = DesktopItems._items.find(i => i.id === startFolderId)?.name || 'Složka';
     const count = Object.keys(Desktop.wm.windows).length;
     const w = 760, h = 500;
-    const x = Math.max(20, Math.round((window.innerWidth  - w) / 2) + count * 28);
-    const y = Math.max(10, Math.round((window.innerHeight - 48 - h) / 2) + count * 22);
+    const dW = window.innerWidth  / _desktopScale;
+    const dH = window.innerHeight / _desktopScale;
+    const x = Math.max(20, Math.round((dW - w) / 2) + count * 28);
+    const y = Math.max(10, Math.round((dH - 48 - h) / 2) + count * 22);
 
     const el = document.createElement('div');
     el.className     = 'window';
@@ -1468,30 +1511,31 @@ const IconDrag = {
       if (e.button !== 0) return;
       if (e.target.closest('.di-rename-input')) return;
 
-      const startX = e.clientX, startY = e.clientY;
+      const startX = _mx(e.clientX), startY = _mx(e.clientY); // desktop coords
       let moved = false;
       const origLeft = parseInt(el.style.left) || 0;
       const origTop  = parseInt(el.style.top)  || 0;
-      const ox = e.clientX - origLeft;
-      const oy = e.clientY - origTop;
+      const ox = _mx(e.clientX) - origLeft;
+      const oy = _mx(e.clientY) - origTop;
       let ghost = null;
       let extras = []; // { el, origLeft, origTop, ghost } for other selected icons
 
       const onMove = mv => {
-        if (!moved && (Math.abs(mv.clientX - startX) > 5 || Math.abs(mv.clientY - startY) > 5)) {
+        if (!moved && (Math.abs(_mx(mv.clientX) - startX) > 5 || Math.abs(_mx(mv.clientY) - startY) > 5)) {
           moved = true;
           el._mouseMoving = true;
           el.classList.add('dragging');
           el.style.zIndex = '99';
 
           // Create ghost for primary icon
+          // Appended to #desktop so position:fixed re-anchors into desktop coordinate space
           ghost = el.cloneNode(true);
           ghost.className = el.className + ' drag-ghost';
           ghost.style.width  = el.offsetWidth  + 'px';
           ghost.style.height = el.offsetHeight + 'px';
           ghost.style.left   = el.style.left;
           ghost.style.top    = el.style.top;
-          document.body.appendChild(ghost);
+          document.getElementById('desktop').appendChild(ghost);
 
           // Multi-drag: also ghost all other selected desktop icons
           if (el.classList.contains('selected')) {
@@ -1506,7 +1550,7 @@ const IconDrag = {
               oGhost.style.left   = other.style.left;
               oGhost.style.top    = other.style.top;
               oGhost.style.zIndex = '98';
-              document.body.appendChild(oGhost);
+              document.getElementById('desktop').appendChild(oGhost);
               other.classList.add('dragging');
               extras.push({ el: other, origLeft: oL, origTop: oT, ghost: oGhost });
             });
@@ -1514,17 +1558,17 @@ const IconDrag = {
         }
         if (!moved) return;
 
-        // Move primary ghost with cursor
-        const nx = mv.clientX - ox;
-        const ny = mv.clientY - oy;
+        // Move primary ghost with cursor (in desktop coordinate space)
+        const nx = _mx(mv.clientX) - ox;
+        const ny = _mx(mv.clientY) - oy;
         if (ghost) {
           ghost.style.left = nx + 'px';
           ghost.style.top  = ny + 'px';
         }
 
-        // Move extra ghosts by same delta
-        const dx = mv.clientX - startX;
-        const dy = mv.clientY - startY;
+        // Move extra ghosts by same delta (desktop coords)
+        const dx = _mx(mv.clientX) - startX;
+        const dy = _mx(mv.clientY) - startY;
         extras.forEach(mg => {
           mg.ghost.style.left = (mg.origLeft + dx) + 'px';
           mg.ghost.style.top  = (mg.origTop  + dy) + 'px';
@@ -1535,6 +1579,7 @@ const IconDrag = {
         el.style.top  = origTop  + 'px';
 
         // Highlight trash icon under cursor (for all draggable icons)
+        // getBoundingClientRect() is viewport space, mv.clientX/Y is viewport space → no _mx needed
         const trashEl = document.getElementById('trashIcon');
         if (trashEl && trashEl !== el) {
           const r = trashEl.getBoundingClientRect();
@@ -1570,7 +1615,7 @@ const IconDrag = {
         document.querySelectorAll('.desktop-icon.drop-target').forEach(f => f.classList.remove('drop-target'));
         document.querySelectorAll('.explorer-content.drop-target').forEach(c => c.classList.remove('drop-target'));
 
-        // Check if dropped onto trash icon
+        // Check if dropped onto trash icon (both getBoundingClientRect and up.clientX/Y are viewport space)
         const trashDrop = document.getElementById('trashIcon');
         if (trashDrop && trashDrop !== el && el.dataset.trash !== '1') {
           const r = trashDrop.getBoundingClientRect();
@@ -1619,15 +1664,15 @@ const IconDrag = {
           }
         }
 
-        // Snap primary icon to grid
-        const snapped = gridSnap(up.clientX - ox, up.clientY - oy);
+        // Snap primary icon to grid (desktop coords)
+        const snapped = gridSnap(_mx(up.clientX) - ox, _mx(up.clientY) - oy);
         el.style.left = snapped.x + 'px';
         el.style.top  = snapped.y + 'px';
         DesktopItems.setPos(el.dataset.appId, snapped.x, snapped.y);
 
-        // Snap all extra icons by same delta
-        const dx = up.clientX - startX;
-        const dy = up.clientY - startY;
+        // Snap all extra icons by same delta (desktop coords)
+        const dx = _mx(up.clientX) - startX;
+        const dy = _mx(up.clientY) - startY;
         extras.forEach(mg => {
           const s = gridSnap(mg.origLeft + dx, mg.origTop + dy);
           mg.el.style.left = s.x + 'px';
@@ -1668,9 +1713,9 @@ const ContextMenu = {
         const winId  = explorerWin.dataset.appId;
         const iconEl = e.target.closest('.exp-icon');
         if (iconEl) {
-          this._showIconMenu(e.clientX, e.clientY, iconEl, winId);
+          this._showIconMenu(_mx(e.clientX), _mx(e.clientY), iconEl, winId);
         } else if (e.target.closest('.explorer-content')) {
-          this._showExplorerMenu(e.clientX, e.clientY, winId);
+          this._showExplorerMenu(_mx(e.clientX), _mx(e.clientY), winId);
         }
         return;
       }
@@ -1680,12 +1725,12 @@ const ContextMenu = {
         document.querySelectorAll('.desktop-icon').forEach(i => i.classList.remove('selected'));
         iconEl.classList.add('selected');
         if (iconEl.dataset.trash === '1') {
-          this._showTrashMenu(e.clientX, e.clientY);
+          this._showTrashMenu(_mx(e.clientX), _mx(e.clientY));
         } else {
-          this._showIconMenu(e.clientX, e.clientY, iconEl, null);
+          this._showIconMenu(_mx(e.clientX), _mx(e.clientY), iconEl, null);
         }
       } else if (e.target.closest('#desktopIcons') || e.target.closest('#desktop')) {
-        this._showDesktopMenu(e.clientX, e.clientY);
+        this._showDesktopMenu(_mx(e.clientX), _mx(e.clientY));
       }
     });
 
@@ -1718,8 +1763,10 @@ const ContextMenu = {
     const menuW = el.offsetWidth  || 210;
     const menuH = el.offsetHeight || 40;
     let cx = x, cy = y;
-    if (cx + menuW > window.innerWidth  - 8)  cx = window.innerWidth  - menuW - 8;
-    if (cy + menuH > window.innerHeight - 56) cy = window.innerHeight - menuH - 56;
+    const _cmVW = window.innerWidth  / _desktopScale;
+    const _cmVH = window.innerHeight / _desktopScale;
+    if (cx + menuW > _cmVW - 8)  cx = _cmVW - menuW - 8;
+    if (cy + menuH > _cmVH - 56) cy = _cmVH - menuH - 56;
     if (cy < 4) cy = 4;
     el.style.left = cx + 'px';
     el.style.top  = cy + 'px';
@@ -2081,11 +2128,11 @@ const StickyNotes = {
       if (e.target.closest('.sticky-close-btn') || e.target.closest('.sticky-color-dot')) return;
       e.preventDefault(); e.stopPropagation();
       noteEl.style.zIndex = ++StickyNotes._zTop;
-      const ox = e.clientX - noteEl.offsetLeft;
-      const oy = e.clientY - noteEl.offsetTop;
+      const ox = _mx(e.clientX) - noteEl.offsetLeft;
+      const oy = _mx(e.clientY) - noteEl.offsetTop;
       const onMove = mv => {
-        noteEl.style.left = Math.max(0, mv.clientX - ox) + 'px';
-        noteEl.style.top  = Math.max(0, mv.clientY - oy) + 'px';
+        noteEl.style.left = Math.max(0, _mx(mv.clientX) - ox) + 'px';
+        noteEl.style.top  = Math.max(0, _mx(mv.clientY) - oy) + 'px';
       };
       const onUp = () => {
         document.removeEventListener('mousemove', onMove);
@@ -2336,8 +2383,10 @@ const TrashWindow = {
     }
     const count = Object.keys(wm.windows).length;
     const w = 640, h = 420;
-    const x = Math.round((window.innerWidth - w) / 2) + count * 24;
-    const y = Math.round((window.innerHeight - 48 - h) / 2) + count * 18;
+    const _tDW = window.innerWidth  / _desktopScale;
+    const _tDH = window.innerHeight / _desktopScale;
+    const x = Math.round((_tDW - w) / 2) + count * 24;
+    const y = Math.round((_tDH - 48 - h) / 2) + count * 18;
     const el = document.createElement('div');
     el.className     = 'window';
     el.dataset.appId = this.WIN_ID;
@@ -2523,7 +2572,7 @@ const TaskbarPins = {
 
     btn.addEventListener('contextmenu', e => {
       e.preventDefault(); e.stopPropagation();
-      ContextMenu._showTaskbarPinMenu(e.clientX, e.clientY, appId);
+      ContextMenu._showTaskbarPinMenu(_mx(e.clientX), _mx(e.clientY), appId);
     });
 
     document.getElementById('taskbarPins').appendChild(btn);
@@ -2549,20 +2598,20 @@ const RubberBand = {
       if (e.target.closest('#contextMenu')) return;
       if (e.target.closest('#settingsModal')) return;
 
-      const startX = e.clientX, startY = e.clientY;
+      const startX = _mx(e.clientX), startY = _mx(e.clientY); // desktop coords
       let selecting = false;
 
       const onMove = mv => {
-        if (!selecting && (Math.abs(mv.clientX - startX) > 4 || Math.abs(mv.clientY - startY) > 4)) {
+        if (!selecting && (Math.abs(_mx(mv.clientX) - startX) > 4 || Math.abs(_mx(mv.clientY) - startY) > 4)) {
           selecting = true;
           document.querySelectorAll('.desktop-icon').forEach(i => i.classList.remove('selected'));
         }
         if (!selecting) return;
 
-        const x1 = Math.min(startX, mv.clientX);
-        const y1 = Math.min(startY, mv.clientY);
-        const x2 = Math.max(startX, mv.clientX);
-        const y2 = Math.max(startY, mv.clientY);
+        const x1 = Math.min(startX, _mx(mv.clientX));
+        const y1 = Math.min(startY, _mx(mv.clientY));
+        const x2 = Math.max(startX, _mx(mv.clientX));
+        const y2 = Math.max(startY, _mx(mv.clientY));
 
         this._boxEl.style.display = 'block';
         this._boxEl.style.left   = x1 + 'px';
@@ -2570,9 +2619,13 @@ const RubberBand = {
         this._boxEl.style.width  = (x2 - x1) + 'px';
         this._boxEl.style.height = (y2 - y1) + 'px';
 
+        // getBoundingClientRect() is in viewport space; convert to desktop space for comparison
         document.querySelectorAll('#desktopIcons .desktop-icon').forEach(icon => {
           const r = icon.getBoundingClientRect();
-          icon.classList.toggle('selected', r.left < x2 && r.right > x1 && r.top < y2 && r.bottom > y1);
+          icon.classList.toggle('selected',
+            r.left / _desktopScale < x2 && r.right  / _desktopScale > x1 &&
+            r.top  / _desktopScale < y2 && r.bottom / _desktopScale > y1
+          );
         });
       };
 
@@ -2633,7 +2686,6 @@ const TaskbarPreview = {
     popup.id = 'tb-preview-popup';
 
     const btnRect = btn.getBoundingClientRect();
-    const cx = btnRect.left + btnRect.width / 2;
 
     // thumbInner declared here so RAF closure can reach it in both branches
     let thumbInner = null;
@@ -2696,10 +2748,12 @@ const TaskbarPreview = {
     });
 
     // RAF 1: position popup while still invisible
+    // btnRect is in viewport space; convert center to desktop space for left style
     requestAnimationFrame(() => {
-      const pw   = popup.offsetWidth;
-      const rawL = cx - pw / 2;
-      const maxL = window.innerWidth - pw - 8;
+      const pw    = popup.offsetWidth;
+      const cxD   = (btnRect.left + btnRect.width / 2) / _desktopScale; // desktop coords
+      const rawL  = cxD - pw / 2;
+      const maxL  = window.innerWidth / _desktopScale - pw - 8;
       popup.style.left = Math.max(8, Math.min(maxL, rawL)) + 'px';
       popup.style.visibility = '';
       popup.classList.add('tb-preview-ready');
@@ -2839,6 +2893,11 @@ const Desktop = {
   wm: null,
 
   init() {
+    // Capture the viewport at first desktop display as the 100% reference
+    DESKTOP_REF_W = window.innerWidth;
+    DESKTOP_REF_H = window.innerHeight;
+    _updateDesktopScale();
+
     this.wm = new WindowManager();
     DesktopItems.load();
     PinnedApps.load();
@@ -2952,7 +3011,7 @@ const Desktop = {
     // Position: saved or default (bottom of first column)
     let pos = DesktopItems.posFor('__trash__');
     if (!pos) {
-      const maxRows = Math.max(3, Math.floor((window.innerHeight - 48 - GRID_PY * 2) / GRID_H));
+      const maxRows = Math.max(3, Math.floor((window.innerHeight / _desktopScale - 48 - GRID_PY * 2) / GRID_H));
       pos = { x: GRID_PX, y: GRID_PY + (maxRows - 1) * GRID_H };
     }
     const snp = gridSnap(pos.x, pos.y);

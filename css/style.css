@@ -307,7 +307,9 @@ html, body {
    DESKTOP
    ============================================================ */
 #desktop {
-  position: fixed; inset: 0;
+  position: fixed; top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  transform-origin: top left;
   background: radial-gradient(ellipse at 25% 35%, #0d2240 0%, #071525 55%, #030b13 100%);
   color: var(--th-text);
   font-family: var(--th-font);

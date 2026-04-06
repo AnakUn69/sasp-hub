@@ -2579,4 +2579,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     }
   );
+
+  // ── Right panel resize handle ─────────────────────────────
+  const resizer    = document.getElementById('panelResizer');
+  const rightPanel = document.getElementById('rightPanel');
+  const STORAGE_KEY = 'sasp_mdt_rightPanelWidth';
+
+  // Restore saved width
+  const savedW = parseInt(localStorage.getItem(STORAGE_KEY));
+  if (savedW && savedW >= 280 && savedW <= 900) rightPanel.style.width = savedW + 'px';
+
+  resizer.addEventListener('mousedown', e => {
+    e.preventDefault();
+    resizer.classList.add('dragging');
+    const startX   = e.clientX;
+    const startW   = rightPanel.offsetWidth;
+    const minWidth = 400;
+    const maxWidth = document.querySelector('.app-panels').offsetWidth - 300;
+
+    const onMove = mv => {
+      const newW = Math.min(maxWidth, Math.max(minWidth, startW - (mv.clientX - startX)));
+      rightPanel.style.width = newW + 'px';
+    };
+    const onUp = () => {
+      resizer.classList.remove('dragging');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      localStorage.setItem(STORAGE_KEY, parseInt(rightPanel.style.width));
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 });
