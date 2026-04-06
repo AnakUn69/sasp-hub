@@ -2893,9 +2893,6 @@ const Desktop = {
   wm: null,
 
   init() {
-    // Capture the viewport at first desktop display as the 100% reference
-    DESKTOP_REF_W = window.innerWidth;
-    DESKTOP_REF_H = window.innerHeight;
     _updateDesktopScale();
 
     this.wm = new WindowManager();
